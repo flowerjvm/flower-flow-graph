@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Flower Flow Graph</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✣</span>
+        <h1>Flower Flow Graph</h1>
+    </div>
+    <div id="project-status" class="project-status loading" role="status" aria-live="polite">
+        <span class="project-status-indicator" aria-hidden="true"></span>
+        <div>
+            <span id="project-status-label" class="eyebrow" data-i18n="project.loadingLabel">LOADING PROJECT</span>
+            <strong id="project-name" data-i18n="project.loading">Loading project…</strong>
+            <span id="project-revision"></span>
+        </div>
+    </div>
+    <div class="header-actions">
+        <button id="open-workspace" class="button button-secondary" type="button"
+                data-i18n="action.openWorkspace">Open file</button>
+        <input id="workspace-file-input" type="file" accept=".flower-graph.json,application/json" hidden>
+        <button id="save-workspace" class="button button-secondary" type="button" disabled
+                data-i18n="action.saveWorkspace">Save file</button>
+        <button id="refresh-button" class="button button-secondary" type="button"
+                data-i18n="action.reanalyze">Re-analyze</button>
+    </div>
+</header>
+
+<main class="workspace">
+    <aside class="sidebar">
+        <section class="sidebar-section worker-section">
+            <button id="worker-section-toggle" class="sidebar-heading sidebar-section-toggle"
+                    type="button" aria-expanded="true" aria-controls="worker-section-content">
+                <span>
+                    <span class="eyebrow">SOURCE WORKERS</span>
+                    <span class="sidebar-title" data-i18n="sidebar.workers">Worker definitions</span>
+                </span>
+                <span class="sidebar-heading-meta">
+                    <span id="worker-count" class="count-badge">0</span>
+                    <span class="section-chevron" aria-hidden="true">⌄</span>
+                </span>
+            </button>
+            <div id="worker-section-content" class="sidebar-section-content">
+                <div id="worker-list" class="worker-list" role="list"></div>
+            </div>
+        </section>
+
+        <section class="sidebar-section flow-section">
+            <button id="flow-section-toggle" class="sidebar-heading sidebar-section-toggle"
+                    type="button" aria-expanded="true" aria-controls="flow-section-content">
+                <span>
+                    <span class="eyebrow">SOURCE DEFINITIONS</span>
+                    <span class="sidebar-title" data-i18n="sidebar.definitions">Flow definitions</span>
+                </span>
+                <span class="sidebar-heading-meta">
+                    <span id="definition-count" class="count-badge">0</span>
+                    <span class="section-chevron" aria-hidden="true">⌄</span>
+                </span>
+            </button>
+            <div id="flow-section-content" class="sidebar-section-content">
+                <button id="flow-map-button" class="flow-map-button" type="button">
+                    <span>
+                        <strong data-i18n="sidebar.flowMap">Project Flow Map</strong>
+                        <small data-i18n="sidebar.flowMapDescription">Submission relationships between Flows</small>
+                    </span>
+                    <span id="relation-count" class="count-badge">0</span>
+                </button>
+                <label class="search-box">
+                    <span class="sr-only" data-i18n="sidebar.searchLabel">Search Flows</span>
+                    <input id="definition-search" type="search" placeholder="Search Flow or file"
+                           data-i18n-placeholder="sidebar.searchPlaceholder">
+                </label>
+                <div id="definition-list" class="definition-list" role="list"></div>
+            </div>
+        </section>
+    </aside>
+
+    <section class="graph-pane">
+        <div class="graph-toolbar">
+            <div>
+                <div class="title-line">
+                    <h2 id="flow-title" data-i18n="graph.selectFlow">Select a Flow</h2>
+                    <span id="flow-kind" class="tag"></span>
+                    <span id="flow-completeness" class="tag tag-muted"></span>
+                </div>
+                <p id="flow-source" class="source-line"></p>
+            </div>
+            <div class="graph-toolbar-actions">
+                <div class="zoom-controls" role="group" aria-label="Graph zoom controls"
+                     data-i18n-aria-label="graph.zoomControls">
+                    <button id="zoom-out" type="button" title="Zoom out (Ctrl + wheel down)"
+                            aria-label="Zoom graph out" data-i18n-title="graph.zoomOutTitle"
+                            data-i18n-aria-label="graph.zoomOut">−</button>
+                    <button id="zoom-reset" type="button" title="Reset to 100%"
+                            data-i18n-title="graph.zoomReset">100%</button>
+                    <button id="zoom-in" type="button" title="Zoom in (Ctrl + wheel up)"
+                            aria-label="Zoom graph in" data-i18n-title="graph.zoomInTitle"
+                            data-i18n-aria-label="graph.zoomIn">+</button>
+                </div>
+                <div class="legend" aria-label="Graph legend" data-i18n-aria-label="graph.legend">
+                    <span><i class="legend-dot source"></i><span data-i18n="legend.source">Source</span></span>
+                    <span><i class="legend-dot linked"></i><span data-i18n="legend.linkedFlow">Linked Flow</span></span>
+                    <span><i class="legend-line goto"></i>goTo</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="graph-empty" class="empty-state">
+            <span class="empty-icon" aria-hidden="true">⌘</span>
+            <h3 data-i18n="graph.emptyTitle">No Flow to display</h3>
+            <p data-i18n="graph.emptyDescription">Select a Flow definition on the left.</p>
+        </div>
+        <div id="graph-scroll" class="graph-scroll" hidden>
+            <svg id="graph" role="img" aria-label="Flower Flow structure graph"
+                 data-i18n-aria-label="graph.ariaLabel"></svg>
+        </div>
+
+        <div id="notice-strip" class="notice-strip" hidden>
+            <button id="notice-toggle" type="button">
+                <span id="notice-summary"></span>
+                <span aria-hidden="true">›</span>
+            </button>
+            <div id="notice-list" class="notice-list" hidden></div>
+        </div>
+    </section>
+
+    <aside class="inspector">
+        <div class="inspector-heading">
+            <span data-i18n="inspector.details">Details</span>
+        </div>
+
+        <section id="details-panel" class="inspector-panel">
+            <div id="node-empty" class="panel-empty">
+                <p data-i18n="inspector.selectStep">Select a Step to see information found in the source.</p>
+            </div>
+            <div id="node-details" hidden></div>
+        </section>
+    </aside>
+</main>
+
+<script src="/app.js" defer></script>
+</body>
+</html>
