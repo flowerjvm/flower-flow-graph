@@ -10,6 +10,9 @@ Read this file before changing the project.
 - The browser UI is read-only with respect to Flower structure and runtime state.
 - Moving nodes, panning, zooming, and saving a workspace only customize the view.
 - Runtime inspection stays read-only. Do not add retry, resume, signal, tick, or mutation controls here.
+- Spring Boot integration is disabled by default and may only start the same
+  loopback-only development server; do not expose source analysis on the host
+  application's public HTTP port.
 - Core models and interchange formats are coding-agent neutral. Product-specific plugins or adapters live outside the core model.
 - Prefer an explicit unknown or partial result over a guessed edge.
 
@@ -31,7 +34,7 @@ Run:
 
 ```powershell
 .\mvnw.cmd test
-.\mvnw.cmd package
+.\mvnw.cmd verify
 ```
 
 When parser behavior changes, test direct builder chains, multiple variants with
