@@ -1,16 +1,31 @@
 # Flower Flow Graph
 
-Flower Flow Graph is a local development tool for reading Flower `Flow` and
-`EventFlow` construction code and showing Workers, Flows, Steps, and their
-source-level relationships as a graph.
+Flower Flow Graph turns a Flower project's Java source into a graph that opens
+in your browser. It helps you answer simple questions such as:
 
-The graph has two strict boundaries:
+- Which Workers and Flows are in this project?
+- What Steps does a Flow contain, and in what order can they run?
+- Which Worker runs a Flow, and does one Flow start another Flow?
+- Where in the source code was each item found?
 
-- **Source graph**: best-effort facts read from Java source.
-- **Runtime state**: a future read-only overlay from a Flower Engine dump.
+Use it when learning an unfamiliar Flower project or when checking a Flow
+structure without reading every factory and Step class first.
 
-Flower Flow Graph does not edit Flower structure or a running Engine. Moving
-nodes, panning, zooming, and saving a workspace only customize the view.
+The tool only reads the project. It does not change Java code or control a
+running Flower Engine. Moving nodes or saving a workspace only changes how the
+graph is arranged on your screen.
+
+## Quick start
+
+From the root of a Maven-based Flower project, run:
+
+```powershell
+mvn io.github.flowerjvm:flower-flow-graph-maven-plugin:0.1.0:serve
+```
+
+The command downloads the tool and opens the graph in your browser. Nothing is
+added to the application and the project source is not modified. Press
+`Ctrl+C` when you are finished.
 
 ## Example
 
@@ -22,7 +37,19 @@ nodes, panning, zooming, and saving a workspace only customize the view.
 
 ![Flower Project Flow Map](docs/images/project-flow-map-example.png)
 
-## Current slice
+## What the graph shows
+
+- Worker and Flow definitions found in the project.
+- Steps and the transitions that can be confirmed from source code.
+- Worker-to-Flow and Flow-to-Flow submission relationships.
+- Event subscriptions and internal `stepNo` phases when they can be found.
+- Source locations and clear partial markers for anything that could not be
+  fully determined.
+
+Select a Worker to see its related Flows, then select a Flow to open its Step
+graph. The Project Flow Map shows submission relationships across the project.
+
+## Detailed analysis coverage
 
 - Finds direct `Flow.builder(...).step(...).build()` and
   `EventFlow.builder(...)` chains.
@@ -49,7 +76,7 @@ nodes, panning, zooming, and saving a workspace only customize the view.
 - Lets a user arrange nodes and save or reopen the source snapshot, positions,
   and zoom levels as a local workspace file.
 
-This first slice does not change source code, connect to a running Engine, or
+The current version does not change source code, connect to a running Engine, or
 provide operational controls.
 
 A possible future graph-editing workflow is recorded separately in
@@ -72,18 +99,11 @@ feature.
 - `flower-flow-graph-spring-boot-starter`: opt-in development server managed by
   the Spring Boot application lifecycle.
 
-## Open from a Maven project
+## Maven options
 
-Run this from the Flower project root. Maven downloads the tool, detects the
-current multi-module project root, starts a loopback-only server, and opens the
-graph in the default browser.
-
-```powershell
-mvn io.github.flowerjvm:flower-flow-graph-maven-plugin:0.1.0:serve
-```
-
-This command does not add a dependency to the application or change its
-`pom.xml`. Press `Ctrl+C` to stop the local graph server.
+The quick-start command detects the current multi-module project root, starts a
+local-only server, and opens the default browser. It does not add a dependency
+or change the project's `pom.xml`.
 
 To use the shorter `mvn flower-flow-graph:serve` form, a project may register
 the plugin once:
