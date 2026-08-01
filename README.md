@@ -62,6 +62,16 @@ feature.
 - Maven 3.6.3 or newer when using the Maven goal
 - No Flower runtime dependency is added to the inspected application
 
+## Modules
+
+- `flower-flow-graph-core`: source analyzer, graph model, browser UI, and
+  loopback-only server.
+- `flower-flow-graph-cli`: executable command-line tool for people and coding
+  agents.
+- `flower-flow-graph-maven-plugin`: graph server launched from a Maven project.
+- `flower-flow-graph-spring-boot-starter`: opt-in development server managed by
+  the Spring Boot application lifecycle.
+
 ## Open from a Maven project
 
 Run this from the Flower project root. Maven downloads the tool, detects the
@@ -98,22 +108,42 @@ mvn flower-flow-graph:serve -Dflower.graph.open=false
 mvn flower-flow-graph:serve -Dflower.graph.project=D:\path\to\project
 ```
 
-## Open from the Spring Boot console
+## Open from a Spring Boot application
 
-Flower's Spring Boot console can expose a `Flow Graph` button configured with
-the local graph URL:
+Add the development-only starter to let the application start and stop the
+loopback graph server with its Spring lifecycle:
+
+```xml
+<dependency>
+  <groupId>io.github.flowerjvm</groupId>
+  <artifactId>flower-flow-graph-spring-boot-starter</artifactId>
+  <version>0.1.0</version>
+  <scope>runtime</scope>
+</dependency>
+```
+
+The starter is disabled unless explicitly enabled. Put the settings in a local
+or development profile:
 
 ```yaml
 flower:
+  flow-graph:
+    enabled: true
+    project-root: .
+    port: 8790
   admin:
     console:
       flow-graph-url: http://localhost:8790/
 ```
 
-Run `flower-flow-graph` separately from the application project. The console
-opens the configured URL in a new tab; the Spring Boot starter does not embed
-or automatically start the source-analysis server. This keeps the runtime
-console read-only and the development tool local to the source checkout.
+`project-root` defaults to the application working directory. The graph server
+binds only to the loopback interface and is not served from the application's
+public HTTP port. Flower's runtime Console remains read-only; its `Flow Graph`
+button only opens this local development server. Keep the starter disabled or
+omit the dependency in production.
+
+Without this starter, the Console button may still point to a graph started
+separately through the Maven plugin or CLI.
 
 ## Build
 
@@ -125,13 +155,13 @@ console read-only and the development tool local to the source checkout.
 ## Inspect as JSON
 
 ```powershell
-java -jar target\flower-flow-graph.jar inspect --project D:\path\to\project
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar inspect --project D:\path\to\project
 ```
 
 When the command is run from the project root, `--project` can be omitted:
 
 ```powershell
-java -jar target\flower-flow-graph.jar inspect --compact
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar inspect --compact
 ```
 
 This JSON entry point is intended for automation and coding agents. It returns
@@ -141,13 +171,13 @@ the browser UI; it does not edit source code.
 ## Open the local graph UI
 
 ```powershell
-java -jar target\flower-flow-graph.jar serve --project D:\path\to\project
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar serve --project D:\path\to\project
 ```
 
 From the project root, the shorter form is:
 
 ```powershell
-java -jar target\flower-flow-graph.jar serve
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar serve
 ```
 
 Then open the printed loopback URL. The default port is `8790`; override it
