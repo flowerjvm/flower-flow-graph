@@ -1,5 +1,10 @@
 # Flower Flow Graph
 
+[![CI](https://github.com/flowerjvm/flower-flow-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/flowerjvm/flower-flow-graph/actions/workflows/ci.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.flowerjvm/flower-flow-graph-core.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.flowerjvm/flower-flow-graph-core/0.1.1)
+
+Latest release: `0.1.1`.
+
 Flower Flow Graph turns a Flower project's Java source into a graph that opens
 in your browser. It helps you answer simple questions such as:
 
@@ -20,7 +25,7 @@ graph is arranged on your screen.
 From the root of a Maven-based Flower project, run:
 
 ```powershell
-mvn io.github.flowerjvm:flower-flow-graph-maven-plugin:0.1.0:serve
+mvn io.github.flowerjvm:flower-flow-graph-maven-plugin:0.1.1:serve
 ```
 
 The command downloads the tool and opens the graph in your browser. Nothing is
@@ -114,7 +119,7 @@ the plugin once:
     <plugin>
       <groupId>io.github.flowerjvm</groupId>
       <artifactId>flower-flow-graph-maven-plugin</artifactId>
-      <version>0.1.0</version>
+      <version>0.1.1</version>
     </plugin>
   </plugins>
 </build>
@@ -137,7 +142,7 @@ loopback graph server with its Spring lifecycle:
 <dependency>
   <groupId>io.github.flowerjvm</groupId>
   <artifactId>flower-flow-graph-spring-boot-starter</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <scope>runtime</scope>
 </dependency>
 ```
@@ -175,13 +180,13 @@ separately through the Maven plugin or CLI.
 ## Inspect as JSON
 
 ```powershell
-java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar inspect --project D:\path\to\project
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.1.jar inspect --project D:\path\to\project
 ```
 
 When the command is run from the project root, `--project` can be omitted:
 
 ```powershell
-java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar inspect --compact
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.1.jar inspect --compact
 ```
 
 This JSON entry point is intended for automation and coding agents. It returns
@@ -191,13 +196,13 @@ the browser UI; it does not edit source code.
 ## Open the local graph UI
 
 ```powershell
-java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar serve --project D:\path\to\project
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.1.jar serve --project D:\path\to\project
 ```
 
 From the project root, the shorter form is:
 
 ```powershell
-java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.0.jar serve
+java -jar flower-flow-graph-cli\target\flower-flow-graph-cli-0.1.1.jar serve
 ```
 
 Then open the printed loopback URL. The default port is `8790`; override it
