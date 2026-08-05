@@ -99,6 +99,83 @@ class FlowSourceAnalyzerTest {
     }
 
     @Test
+    void distinguishesDurableStepRecoveryPolicyFromGuardOverload() throws IOException {
+        writeSource("src/main/java/example/DurableFlowFactory.java", """
+                package example;
+
+                final class DurableFlowFactory {
+                    Flow create(String key) {
+                        return Flow.builder("durable", key)
+                                .durableStep(
+                                        "without-guard",
+                                        new PrepareStep(),
+                                        RecoveryPolicy.REENTER_IDEMPOTENT)
+                                .durableStep(
+                                        "with-guard",
+                                        new ProtectedStep(),
+                                        new RecoveryGuard(),
+                                        RecoveryPolicy.REENTER_IDEMPOTENT)
+                                .step("fallback", new FallbackStep())
+                                .build();
+                    }
+                }
+
+                final class PrepareStep {
+                    StepResult tick() {
+                        return StepResult.done();
+                    }
+                }
+
+                final class ProtectedStep {
+                    StepResult tick() {
+                        return StepResult.done();
+                    }
+                }
+
+                final class RecoveryGuard {
+                    GuardResult check() {
+                        return GuardResult.goTo("fallback");
+                    }
+                }
+
+                final class FallbackStep {
+                    StepResult tick() {
+                        return StepResult.finish();
+                    }
+                }
+                """);
+
+        FlowGraphDocument document = analyzer.analyze(project);
+
+        var definition = document.definitions().get(0);
+        var withoutGuard = definition.steps().stream()
+                .filter(step -> step.id().equals("without-guard"))
+                .findFirst()
+                .orElseThrow();
+        var withGuard = definition.steps().stream()
+                .filter(step -> step.id().equals("with-guard"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(withoutGuard.durableStep());
+        assertFalse(withoutGuard.guarded());
+        assertNull(withoutGuard.guardType());
+        assertEquals("", withoutGuard.guardExpression());
+        assertFalse(definition.transitions().stream().anyMatch(transition ->
+                transition.kind() == TransitionKind.GUARD_GO_TO
+                        && transition.fromStepId().equals("without-guard")));
+
+        assertTrue(withGuard.durableStep());
+        assertTrue(withGuard.guarded());
+        assertEquals("RecoveryGuard", withGuard.guardType());
+        assertEquals("new RecoveryGuard()", withGuard.guardExpression());
+        assertTrue(definition.transitions().stream().anyMatch(transition ->
+                transition.kind() == TransitionKind.GUARD_GO_TO
+                        && transition.fromStepId().equals("with-guard")
+                        && transition.toStepId().equals("fallback")));
+    }
+
+    @Test
     void keepsSameFlowTypeSourceVariantsSeparate() throws IOException {
         writeSource("src/main/java/example/RecoveryFactory.java", """
                 package example;
@@ -339,6 +416,132 @@ class FlowSourceAnalyzerTest {
                         && transition.trigger()
                         == FlowGraphDocument.InternalTransitionTrigger.TIMEOUT));
         assertFalse(step.internalStructurePartial());
+    }
+
+    @Test
+    void ignoresStepNoReadsUsedOnlyAsMetadata() throws IOException {
+        writeSource("src/main/java/example/ActionFlow.java", """
+                package example;
+
+                final class ActionFlow {
+                    Flow create() {
+                        return Flow.builder("action", "one")
+                                .step("trigger-analysis", new FlowActionStep())
+                                .build();
+                    }
+                }
+
+                final class FlowActionStep {
+                    StepResult onTick(StepContext context) {
+                        String durableInvocation =
+                                context.currentStepId() + ":" + context.stepNo();
+                        return submit(Map.of(
+                                "requestId", durableInvocation,
+                                "flowerStepNo", context.stepNo()));
+                    }
+
+                    private StepResult submit(Map<String, Object> metadata) {
+                        return StepResult.done();
+                    }
+                }
+                """);
+
+        var document = analyzer.analyze(project);
+        var step = document.definitions().get(0).steps().get(0);
+
+        assertTrue(step.internalPhases().isEmpty());
+        assertTrue(step.internalTransitions().isEmpty());
+        assertFalse(step.internalStructurePartial());
+        assertFalse(document.definitions().get(0).notices().stream()
+                .anyMatch(notice -> notice.code().equals("STEP_NO_STRUCTURE_PARTIAL")));
+    }
+
+    @Test
+    void readsLiteralIfStepNoPhasesAndTransitions() throws IOException {
+        writeSource("src/main/java/example/IfPhaseFlow.java", """
+                package example;
+
+                final class IfPhaseFlow {
+                    Flow create() {
+                        return Flow.builder("if-phase", "one")
+                                .step("monitor", new IfPhaseStep())
+                                .build();
+                    }
+                }
+
+                final class IfPhaseStep {
+                    private static final int PREPARE = 10;
+                    private static final int WAIT = 20;
+
+                    StepResult onTick(StepContext context) {
+                        if (context.stepNo() == PREPARE) {
+                            return prepare(context);
+                        }
+                        if (WAIT == context.stepNo()) {
+                            return waitForResult(context);
+                        }
+                        return StepResult.fail(new IllegalStateException());
+                    }
+
+                    private StepResult prepare(StepContext context) {
+                        context.setStepNo(WAIT);
+                        return StepResult.stay();
+                    }
+
+                    private StepResult waitForResult(StepContext context) {
+                        if (context.timedOut()) {
+                            context.setStepNo(PREPARE);
+                        }
+                        return StepResult.stay();
+                    }
+                }
+                """);
+
+        var step = analyzer.analyze(project).definitions().get(0).steps().get(0);
+
+        assertEquals(List.of(10, 20), step.internalPhases().stream()
+                .map(FlowGraphDocument.StepPhase::stepNo)
+                .toList());
+        assertEquals(List.of("PREPARE", "WAIT"), step.internalPhases().stream()
+                .map(FlowGraphDocument.StepPhase::label)
+                .toList());
+        assertTrue(step.internalTransitions().stream().anyMatch(transition ->
+                transition.fromStepNo() == 10
+                        && Integer.valueOf(20).equals(transition.toStepNo())));
+        assertTrue(step.internalTransitions().stream().anyMatch(transition ->
+                transition.fromStepNo() == 20
+                        && Integer.valueOf(10).equals(transition.toStepNo())
+                        && transition.trigger()
+                        == FlowGraphDocument.InternalTransitionTrigger.TIMEOUT));
+        assertFalse(step.internalStructurePartial());
+    }
+
+    @Test
+    void keepsUnscopedSetStepNoExplicitlyPartialWithoutInventingAnEdge() throws IOException {
+        writeSource("src/main/java/example/UnscopedTransitionFlow.java", """
+                package example;
+
+                final class UnscopedTransitionFlow {
+                    Flow create() {
+                        return Flow.builder("unscoped", "one")
+                                .step("advance", new AdvanceStep())
+                                .build();
+                    }
+                }
+
+                final class AdvanceStep {
+                    StepResult onTick(StepContext context) {
+                        context.setStepNo(10);
+                        return StepResult.stay();
+                    }
+                }
+                """);
+
+        var step = analyzer.analyze(project).definitions().get(0).steps().get(0);
+
+        assertTrue(step.internalPhases().isEmpty());
+        assertTrue(step.internalTransitions().isEmpty());
+        assertTrue(step.internalStructurePartial());
     }
 
     @Test

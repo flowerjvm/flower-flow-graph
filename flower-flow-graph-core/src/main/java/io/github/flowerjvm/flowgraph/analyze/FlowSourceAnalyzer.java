@@ -755,9 +755,7 @@ public final class FlowSourceAnalyzer {
                     ? call.getArgument(1)
                     : null;
             String stepType = expressionType(stepExpression, sourceUnit, typesBySimpleName);
-            Expression guardExpression = call.getArguments().size() >= 3
-                    ? call.getArgument(2)
-                    : null;
+            Expression guardExpression = guardExpression(call);
             boolean guarded = guardExpression != null && !(guardExpression instanceof NullLiteralExpr);
             String guardType = expressionType(guardExpression, sourceUnit, typesBySimpleName);
             boolean repeatedDynamically = isInsideLoop(call);
@@ -1552,53 +1550,71 @@ public final class FlowSourceAnalyzer {
                 .toList();
         List<StepPhase> phases = new ArrayList<>();
         List<StepPhaseTransition> transitions = new ArrayList<>();
+        Set<String> structuredSetStepNoCalls = new HashSet<>();
         boolean partial = false;
         for (SwitchEntry entry : entries) {
             if (entry.getLabels().isEmpty()) {
                 continue;
             }
-            List<MethodCallExpr> calls = reachableCalls(entry, declaration);
-            List<SignalUse> signalUses = calls.stream()
-                    .map(call -> signalUse(call, sourceUnit))
-                    .flatMap(Optional::stream)
-                    .distinct()
-                    .toList();
-            boolean startsTimeout = calls.stream()
-                    .anyMatch(call -> isStepContextCall(call, "startTimeout"));
-            boolean checksTimeout = calls.stream()
-                    .anyMatch(call -> isStepContextCall(call, "timedOut"));
-
             for (Expression labelExpression : entry.getLabels()) {
                 Integer stepNo = resolveInteger(labelExpression, sourceUnit.integerConstants());
                 if (stepNo == null) {
                     partial = true;
                     continue;
                 }
-                phases.add(new StepPhase(
+                partial |= addStepNoPhase(
                         stepNo,
-                        phaseLabel(labelExpression, stepNo),
-                        signalUses,
-                        startsTimeout,
-                        checksTimeout,
-                        sourceRef(sourceUnit, labelExpression)));
-                for (MethodCallExpr call : calls) {
-                    if (!isStepContextCall(call, "setStepNo") || call.getArguments().isEmpty()) {
-                        continue;
-                    }
-                    Expression targetExpression = call.getArgument(0);
-                    Integer target = resolveInteger(targetExpression, sourceUnit.integerConstants());
-                    if (target == null) {
-                        partial = true;
-                    }
-                    transitions.add(new StepPhaseTransition(
-                            stepNo,
-                            target,
-                            targetExpression.toString(),
-                            isGuardedByTimeout(call)
-                                    ? InternalTransitionTrigger.TIMEOUT
-                                    : InternalTransitionTrigger.SET_STEP_NO,
-                            sourceRef(sourceUnit, call)));
-                }
+                        labelExpression,
+                        entry,
+                        declaration,
+                        sourceUnit,
+                        phases,
+                        transitions,
+                        structuredSetStepNoCalls);
+            }
+        }
+
+        List<IfStmt> stepNoIfStatements = declaration.findAll(
+                        IfStmt.class,
+                        statement -> belongsToType(statement, declaration))
+                .stream()
+                .sorted(NODE_ORDER)
+                .toList();
+        for (IfStmt ifStmt : stepNoIfStatements) {
+            for (StepNoPhaseCondition condition : literalStepNoConditions(
+                    ifStmt.getCondition(),
+                    sourceUnit)) {
+                partial |= addStepNoPhase(
+                        condition.stepNo(),
+                        condition.expression(),
+                        ifStmt.getThenStmt(),
+                        declaration,
+                        sourceUnit,
+                        phases,
+                        transitions,
+                        structuredSetStepNoCalls);
+            }
+        }
+
+        List<ConditionalExpr> stepNoConditionals = declaration.findAll(
+                        ConditionalExpr.class,
+                        expression -> belongsToType(expression, declaration))
+                .stream()
+                .sorted(NODE_ORDER)
+                .toList();
+        for (ConditionalExpr conditional : stepNoConditionals) {
+            for (StepNoPhaseCondition condition : literalStepNoConditions(
+                    conditional.getCondition(),
+                    sourceUnit)) {
+                partial |= addStepNoPhase(
+                        condition.stepNo(),
+                        condition.expression(),
+                        conditional.getThenExpr(),
+                        declaration,
+                        sourceUnit,
+                        phases,
+                        transitions,
+                        structuredSetStepNoCalls);
             }
         }
 
@@ -1628,15 +1644,25 @@ public final class FlowSourceAnalyzer {
                         && !phaseNumbers.contains(transition.toStepNo()))) {
             partial = true;
         }
-        boolean usesStepNo = declaration.findAll(MethodCallExpr.class).stream()
+        List<MethodCallExpr> setStepNoCalls = declaration.findAll(MethodCallExpr.class).stream()
+                .filter(call -> belongsToType(call, declaration))
+                .filter(call -> isStepContextCall(call, "setStepNo"))
+                .toList();
+        if (setStepNoCalls.stream().anyMatch(call ->
+                !structuredSetStepNoCalls.contains(nodeKey(call)))) {
+            partial = true;
+        }
+        boolean usesStepNoForControlFlow = declaration.findAll(MethodCallExpr.class).stream()
                 .anyMatch(call -> belongsToType(call, declaration)
-                        && isStepContextCall(call, "stepNo"));
-        if (usesStepNo && phases.isEmpty()) {
+                        && isStepContextCall(call, "stepNo")
+                        && isControlFlowUse(call));
+        boolean hasStepNoStructure = usesStepNoForControlFlow || !setStepNoCalls.isEmpty();
+        if (hasStepNoStructure && phases.isEmpty()) {
             partial = true;
             notices.add(new AnalysisNotice(
                     "STEP_NO_STRUCTURE_PARTIAL",
                     NoticeSeverity.INFO,
-                    "Step source uses stepNo, but no literal switch(ctx.stepNo()) phases were resolved.",
+                    "Step source uses or updates stepNo for control flow, but no literal internal phases were resolved.",
                     declarationSource));
         }
         if (partial && !phases.isEmpty()) {
@@ -1647,6 +1673,154 @@ public final class FlowSourceAnalyzer {
                     declarationSource));
         }
         return new StepStructureFacts(subscriptions, phases, transitions, partial);
+    }
+
+    private boolean addStepNoPhase(
+            int stepNo,
+            Expression phaseExpression,
+            Node phaseBody,
+            ClassOrInterfaceDeclaration declaration,
+            SourceUnit sourceUnit,
+            List<StepPhase> phases,
+            List<StepPhaseTransition> transitions,
+            Set<String> structuredSetStepNoCalls
+    ) {
+        List<MethodCallExpr> calls = reachableCalls(phaseBody, declaration);
+        List<SignalUse> signalUses = calls.stream()
+                .map(call -> signalUse(call, sourceUnit))
+                .flatMap(Optional::stream)
+                .distinct()
+                .toList();
+        boolean startsTimeout = calls.stream()
+                .anyMatch(call -> isStepContextCall(call, "startTimeout"));
+        boolean checksTimeout = calls.stream()
+                .anyMatch(call -> isStepContextCall(call, "timedOut"));
+        phases.add(new StepPhase(
+                stepNo,
+                phaseLabel(phaseExpression, stepNo),
+                signalUses,
+                startsTimeout,
+                checksTimeout,
+                sourceRef(sourceUnit, phaseExpression)));
+
+        boolean partial = false;
+        for (MethodCallExpr call : calls) {
+            if (!isStepContextCall(call, "setStepNo") || call.getArguments().isEmpty()) {
+                continue;
+            }
+            structuredSetStepNoCalls.add(nodeKey(call));
+            Expression targetExpression = call.getArgument(0);
+            Integer target = resolveInteger(targetExpression, sourceUnit.integerConstants());
+            if (target == null) {
+                partial = true;
+            }
+            transitions.add(new StepPhaseTransition(
+                    stepNo,
+                    target,
+                    targetExpression.toString(),
+                    isGuardedByTimeout(call)
+                            ? InternalTransitionTrigger.TIMEOUT
+                            : InternalTransitionTrigger.SET_STEP_NO,
+                    sourceRef(sourceUnit, call)));
+        }
+        return partial;
+    }
+
+    private List<StepNoPhaseCondition> literalStepNoConditions(
+            Expression condition,
+            SourceUnit sourceUnit
+    ) {
+        Map<String, BinaryExpr> comparisons = new LinkedHashMap<>();
+        if (condition instanceof BinaryExpr binary) {
+            comparisons.put(nodeKey(binary), binary);
+        }
+        condition.findAll(BinaryExpr.class).forEach(binary ->
+                comparisons.putIfAbsent(nodeKey(binary), binary));
+
+        List<StepNoPhaseCondition> conditions = new ArrayList<>();
+        for (BinaryExpr comparison : comparisons.values()) {
+            if (comparison.getOperator() != BinaryExpr.Operator.EQUALS) {
+                continue;
+            }
+            Expression valueExpression = null;
+            if (isStepNoExpression(comparison.getLeft())) {
+                valueExpression = comparison.getRight();
+            } else if (isStepNoExpression(comparison.getRight())) {
+                valueExpression = comparison.getLeft();
+            }
+            if (valueExpression == null) {
+                continue;
+            }
+            Integer stepNo = resolveInteger(valueExpression, sourceUnit.integerConstants());
+            if (stepNo != null) {
+                conditions.add(new StepNoPhaseCondition(stepNo, valueExpression));
+            }
+        }
+        return conditions;
+    }
+
+    private boolean isStepNoExpression(Expression expression) {
+        Expression candidate = expression;
+        while (candidate instanceof EnclosedExpr enclosed) {
+            candidate = enclosed.getInner();
+        }
+        return candidate instanceof MethodCallExpr call
+                && isStepContextCall(call, "stepNo");
+    }
+
+    private boolean isControlFlowUse(MethodCallExpr stepNoCall) {
+        Optional<CallableDeclaration<?>> callable = enclosingCallable(stepNoCall);
+        Node cursor = stepNoCall;
+        while (cursor.getParentNode().isPresent()) {
+            cursor = cursor.getParentNode().orElseThrow();
+            if (cursor instanceof SwitchExpr switchExpr
+                    && isWithin(stepNoCall, switchExpr.getSelector())) {
+                return true;
+            }
+            if (cursor instanceof SwitchStmt switchStmt
+                    && isWithin(stepNoCall, switchStmt.getSelector())) {
+                return true;
+            }
+            if (cursor instanceof IfStmt ifStmt
+                    && isWithin(stepNoCall, ifStmt.getCondition())) {
+                return true;
+            }
+            if (cursor instanceof ConditionalExpr conditional
+                    && isWithin(stepNoCall, conditional.getCondition())) {
+                return true;
+            }
+            if (cursor instanceof WhileStmt whileStmt
+                    && isWithin(stepNoCall, whileStmt.getCondition())) {
+                return true;
+            }
+            if (cursor instanceof DoStmt doStmt
+                    && isWithin(stepNoCall, doStmt.getCondition())) {
+                return true;
+            }
+            if (cursor instanceof ForStmt forStmt
+                    && forStmt.getCompare().stream()
+                    .anyMatch(compare -> isWithin(stepNoCall, compare))) {
+                return true;
+            }
+            if (callable.isPresent() && cursor == callable.orElseThrow()) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private boolean isWithin(Node node, Node possibleAncestor) {
+        Node cursor = node;
+        while (true) {
+            if (cursor == possibleAncestor) {
+                return true;
+            }
+            Optional<Node> parent = cursor.getParentNode();
+            if (parent.isEmpty()) {
+                return false;
+            }
+            cursor = parent.orElseThrow();
+        }
     }
 
     private Optional<EventSubscription> eventSubscription(
@@ -1914,6 +2088,18 @@ public final class FlowSourceAnalyzer {
     private boolean isStepCall(MethodCallExpr call) {
         String name = call.getNameAsString();
         return name.equals("step") || name.equals("durableStep");
+    }
+
+    private Expression guardExpression(MethodCallExpr call) {
+        String name = call.getNameAsString();
+        int argumentCount = call.getArguments().size();
+        if (name.equals("step") && argumentCount == 3) {
+            return call.getArgument(2);
+        }
+        if (name.equals("durableStep") && argumentCount == 4) {
+            return call.getArgument(2);
+        }
+        return null;
     }
 
     private boolean makesDurable(MethodCallExpr call) {
@@ -2406,5 +2592,11 @@ public final class FlowSourceAnalyzer {
         private static StepStructureFacts empty() {
             return new StepStructureFacts(List.of(), List.of(), List.of(), false);
         }
+    }
+
+    private record StepNoPhaseCondition(
+            int stepNo,
+            Expression expression
+    ) {
     }
 }
